@@ -179,7 +179,9 @@ def voice_load(voice_name):
     result = _get_param(None, ctypes.byref(size))
     if result != Err.INSUFFICIENT or size.value < ctypes.sizeof(TtsParam1):
         raise Exception("sizeof(TtsParam1) (=%s) > size (=%s)" % (ctypes.sizeof(TtsParam1), size.value))
-    num_speakers = int((size.value-ctypes.sizeof(gen_TtsParam(0)))/ctypes.sizeof(SpeakerParam))
+    num_speakers, mod = divmod((size.value-ctypes.sizeof(gen_TtsParam(0))), ctypes.sizeof(SpeakerParam))
+    if mod != 0:
+        raise Exception("size is invalid: %s (unable to decide num_speakers)" % (size.value, ))
     TtsParamN = gen_TtsParam(num_speakers)
     if ctypes.sizeof(TtsParamN) != size.value:
         raise Exception("sizeof(TtsParamN) (=%s) != size (=%s)" % (ctypes.sizeof(TtsParamN), size.value))
