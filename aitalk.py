@@ -305,7 +305,7 @@ def callbackTextBuf(reason_code, job_id, user_data):
             if result != Err.SUCCESS:
                 break
             user_data.kana_output += user_data.kana_buffer[:read_bytes.value]
-            if (buffer_size.value-1) > read_bytes.value:
+            if (buffer_size-1) > read_bytes.value:
                 break
         if reason_code != EventReasonCode.TEXTBUF_CLOSE:
             return 0
@@ -372,6 +372,9 @@ def voice_load(voice_name):
     param.procTextBuf = callbackTextBufPtr
     param.procRawBuf = callbackRawBufPtr
     param.procEventTts = callbackEventTtsPtr
+    # param.procTextBuf = ProcTextBuf(callbackTextBuf)
+    # param.procRawBuf = ProcRawBuf(callbackRawBuf)
+    # param.procEventTts = ProcEventTTS(callbackEventTts)
 
     param.extendFormat = ExtendedFormat.JEITA_RUBY | ExtendedFormat.AUTO_BOOKMARK
     
@@ -379,6 +382,7 @@ def voice_load(voice_name):
 
     # if param.numSpeakers != num_speakers:
     #     raise Exception("%s != %s" % (param.numSpeakers, num_speakers))
+    # return param
 
 def end():
     raise_for_result(_end())
