@@ -8,16 +8,16 @@ import ctypes
 
 def main():
     sys.stderr.write("[debug] pid=%s\n"%os.getpid())
-    # aitalk.end()
+    aitalk.end()
+
     auth_code = os.environ["AITALK_AUTHCODE"]
     aitalk.init(auth_code)
     aitalk.lang_load("standard")
     aitalk.voice_load("nozomi_22")
 
-    user_data = aitalk.gen_user_data()
+    user_data = aitalk.UserData()
 
-    text = "こんにちは"
-    # text = "abc"
+    text = "こんにちは。今日はいい天気ですね。"
     sys.stderr.write("text=%s\n" % text)
 
     kana = aitalk.text_to_kana(user_data, text)
