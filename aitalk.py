@@ -6,9 +6,12 @@ import ctypes
 import enum
 import threading
 import time
+import signal
+import io
 
 import subprocess
-# import win32event
+import win32api
+import win32event
 import win32con
 
 install_path = os.environ["AITALK_PATH"]
@@ -16,6 +19,49 @@ voice_db_dir = "Voice"
 license_path = "aitalk.lic"
 
 aitalked_dll = ctypes.WinDLL(os.path.join(install_path, "aitalked.dll"))
+
+class DoOnExit:
+    def __init__(self, func, argv=()):
+        self.func = func
+        self.argv = argv
+    def __enter__(self):
+        return self
+    def __exit__(self, exc_type, exc_value, traceback):
+        self.func(*self.argv)
+
+
+def gen_sigint_handler(sigint_event):
+    def sigint_handler(signum, frame):
+        win32event.SetEvent(sigint_event)
+    return sigint_handler
+
+def wait_complete(close_event_handle, timeout=win32event.INFINITE):
+    sigint_handler_save = signal.getsignal(signal.SIGINT)
+    sigint_event = win32event.CreateEvent(None, True, False, None)
+    with \
+        DoOnExit(signal.signal, (signal.SIGINT, sigint_handler_save)) , \
+        DoOnExit(sigint_event.close) :
+        stdin_handle = win32api.GetStdHandle(win32api.STD_INPUT_HANDLE)
+        signal.signal(signal.SIGINT, gen_sigint_handler(sigint_event))
+        event_array = (sigint_event, close_event_handle, stdin_handle)
+
+        while True:
+            wait_result = win32event.WaitForMultipleObjects(event_array, False, timeout)
+            if wait_result == win32event.WAIT_TIMEOUT:
+                raise Exception("timeout")
+            elif wait_result == win32con.WAIT_OBJECT_0:
+                end()
+                raise Exception("sigint")
+            elif wait_result == win32con.WAIT_OBJECT_0 + 1:
+                break
+            elif wait_result == win32con.WAIT_OBJECT_0 + 2:
+                continue
+            elif wait_result == win32event.WAIT_ABANDONED:
+                raise Exception("WAIT_ABANDONED")
+            elif wait_result == win32event.WAIT_TIMEOUT:
+                raise Exception("timeout")
+            else:
+                raise Exception("unexpected wait_result 0x%x" % wait_result)
 
 class Err(enum.IntEnum):
     SUCCESS = 0
@@ -102,15 +148,6 @@ class Config(ctypes.Structure):
 MAX_VOICENAME = 80
 MAX_JEITACONTROL = 12
 
-class UserData:
-    def __init__(self):
-        self.kana_buffer = ctypes.create_string_buffer(KANA_BUFFER_SIZE)
-        self.kana_output = None
-        self.speech_buffer = ctypes.create_string_buffer(SPEECH_BUFFER_SIZE*2)
-        self.speech_output = None
-        # self.close_event_handle = win32event.CreateEvent(None, True, False, None)
-        self.close_event_handle = threading.Event()
-
 ProcTextBuf = ctypes.WINFUNCTYPE(ctypes.c_int32, ctypes.c_int32, ctypes.c_int32, ctypes.py_object)
 ProcRawBuf = ctypes.WINFUNCTYPE(ctypes.c_int32, ctypes.c_int32, ctypes.c_int32, ctypes.c_uint64, ctypes.py_object)
 ProcEventTTS = ctypes.WINFUNCTYPE(ctypes.c_int32, ctypes.c_int32, ctypes.c_int32, ctypes.c_uint64, ctypes.c_char_p, ctypes.py_object)
@@ -188,6 +225,8 @@ def init(auth_code):
     config.__reserved__ = 0
     raise_for_result(_init(ctypes.byref(config)))
 
+
+
 def lang_load(language_name):
     language_path = os.path.join(os.path.join(install_path, "Lang"), language_name)
     cwd_save = os.getcwd()
@@ -213,71 +252,82 @@ class JobParam(ctypes.Structure):
     )
 
 
-def text_to_kana(user_data, text, timeout=None):
-    text_encoded = text.encode(ENCODING)
-    user_data.close_event_handle.clear()
-    user_data.kana_output = b''
-    job_param = JobParam()
-    job_param.mode_io = JobIOMode.PLAIN_TO_AIKANA
-    job_param.user_data = user_data
-    job_id = ctypes.c_int32()
-    raise_for_result(_text_to_kana(ctypes.byref(job_id), ctypes.byref(job_param), text_encoded))
-    wait_result = user_data.close_event_handle.wait(timeout)
-    raise_for_result(_close_kana(job_id, 0))
-    if not wait_result:
-        raise Exception("text_to_kana timeout")
-    return user_data.kana_output.decode(ENCODING)
+class ConversionData():
+    def __init__(self, outfile, buffer_length):
+        self.buffer = (ctypes.c_char*buffer_length)()
+        self.close_event_handle = win32event.CreateEvent(None, True, False, None)
+        self.output = outfile
+        
+    def __enter__(self):
+        return self
+    def __exit__(self, exc_type, exc_value, traceback):
+        self.close_event_handle.close()
 
-def kana_to_speech(user_data, kana, timeout=None):
+def gen_text_to_kana_data(outfile):
+    return ConversionData(outfile, KANA_BUFFER_SIZE)
+
+def text_to_kana(text, timeout=win32event.INFINITE):
+    text_encoded = text.encode(ENCODING)
+    with io.BytesIO() as outfile, gen_text_to_kana_data(outfile) as user_data:
+        job_param = JobParam()
+        job_param.mode_io = JobIOMode.PLAIN_TO_AIKANA
+        job_param.user_data = user_data
+        job_id = ctypes.c_int32()
+        raise_for_result(_text_to_kana(ctypes.byref(job_id), ctypes.byref(job_param), text_encoded))
+        wait_complete(user_data.close_event_handle, timeout)
+        raise_for_result(_close_kana(job_id, 0))
+        outfile.seek(0)
+        return outfile.read().decode(ENCODING)
+
+def gen_kana_to_speech_data(file):
+    return ConversionData(file, SPEECH_BUFFER_SIZE*2)
+
+def kana_to_speech(kana, outfile, timeout=win32event.INFINITE):
     kana_encoded = kana.encode(ENCODING)
-    user_data.close_event_handle.clear()
-    job_param = JobParam()
-    job_param.mode_io = JobIOMode.AIKANA_TO_WAVE
-    job_param.user_data = user_data
-    job_id = ctypes.c_int32()
-    raise_for_result(_text_to_speech(ctypes.byref(job_id), ctypes.byref(job_param), kana_encoded))
-    wait_result = user_data.close_event_handle.wait(timeout)
-    raise_for_result(_close_speech(job_id, 0))
-    if not wait_result:
-        raise Exception("text_to_kana timeout")
+    with gen_kana_to_speech_data(outfile) as user_data:
+        job_param = JobParam()
+        job_param.mode_io = JobIOMode.AIKANA_TO_WAVE
+        job_param.user_data = user_data
+        job_id = ctypes.c_int32()
+        raise_for_result(_text_to_speech(ctypes.byref(job_id), ctypes.byref(job_param), kana_encoded))
+        wait_complete(user_data.close_event_handle, timeout)
+        raise_for_result(_close_speech(job_id, 0))
 
 def callback_text_buf(reason_code, job_id, user_data):
     if reason_code in (EventReasonCode.TEXTBUF_FULL, EventReasonCode.TEXTBUF_FLUSH, EventReasonCode.TEXTBUF_CLOSE):
-        buffer = user_data.kana_buffer
+        buffer = user_data.buffer
         buffer_size = len(buffer)
         read_bytes = ctypes.c_uint32()
         while True:
             pos = ctypes.c_uint32()
-            result = _get_kana(job_id, buffer, buffer_size, ctypes.byref(read_bytes), ctypes.byref(pos))
+            result = _get_kana(job_id, ctypes.byref(buffer), buffer_size, ctypes.byref(read_bytes), ctypes.byref(pos))
             if result != Err.SUCCESS:
                 break
-            user_data.kana_output += user_data.kana_buffer[:read_bytes.value]
+            user_data.output.write(buffer[:read_bytes.value])
             if (buffer_size-1) > read_bytes.value:
                 break
         if reason_code != EventReasonCode.TEXTBUF_CLOSE:
             return 0
-    # win32event.SetEvent(user_data.close_event_handle)
-    user_data.close_event_handle.set()
+    win32event.SetEvent(user_data.close_event_handle)
     return 0
 callback_text_buf_ptr = ProcTextBuf(callback_text_buf)
 
 def callback_raw_buf(reason_code, job_id, tick, user_data):
     if reason_code in (EventReasonCode.RAWBUF_FULL, EventReasonCode.RAWBUF_FLUSH, EventReasonCode.RAWBUF_CLOSE):
-        buffer = user_data.speech_buffer
+        buffer = user_data.buffer
         buffer_size = len(buffer)//2
         read_samples = ctypes.c_uint32()
         while True:
             result = _get_data(job_id, buffer, buffer_size, ctypes.byref(read_samples))
             if result != Err.SUCCESS:
                 break
-            user_data.speech_output.write(buffer[:read_samples.value*2])
+            user_data.output.write(buffer[:read_samples.value*2])
             if buffer_size > read_samples.value:
                 break
         if reason_code != EventReasonCode.RAWBUF_CLOSE:
             return 0
-    user_data.close_event_handle.set()
+    win32event.SetEvent(user_data.close_event_handle)
     return 0
-
 callback_raw_buf_ptr = ProcRawBuf(callback_raw_buf)
 
 def callback_event_tts(reason_code, job_id, tick, name, user_data):
@@ -306,7 +356,6 @@ def voice_load(voice_name):
     param.proc_text_buf = callback_text_buf_ptr
     param.proc_raw_buf = callback_raw_buf_ptr
     param.proc_event_tts = callback_event_tts_ptr
-    param.PROC = "a"
 
     param.extend_format = ExtendedFormat.JEITA_RUBY | ExtendedFormat.AUTO_BOOKMARK
     
@@ -314,6 +363,7 @@ def voice_load(voice_name):
 
 def end():
     raise_for_result(_end())
+
 
 # using Type_AITalkAPI_CloseKana = AITalkResultCode(__stdcall *)(int32_t, int32_t);
 _close_kana.restype = ctypes.c_int32
@@ -330,7 +380,7 @@ _end.argtypes = ()
 # using Type_AITalkAPI_GetData = AITalkResultCode(__stdcall *)(int32_t, int16_t*, uint32_t, _uint32_t*);
 _get_data.restype = ctypes.c_int32
 # _get_data.argtypes = (ctypes.c_int32, ctypes.POINTER(ctypes.c_int16), ctypes.c_uint32, ctypes.POINTER(ctypes.c_uint32))
-_get_data.argtypes = (ctypes.c_int32, ctypes.c_char_p, ctypes.c_uint32, ctypes.POINTER(ctypes.c_uint32))
+_get_data.argtypes = (ctypes.c_int32, ctypes.c_void_p, ctypes.c_uint32, ctypes.POINTER(ctypes.c_uint32))
 
 # using Type_AITalkAPI_GetJeitaControl = AITalkResultCode(__stdcall *)(int32_t, const char*);
 _get_jeita_control.restype = ctypes.c_int32
@@ -338,7 +388,7 @@ _get_jeita_control.argtypes = (ctypes.c_int32, ctypes.c_char_p)
 
 # using Type_AITalkAPI_GetKana = AITalkResultCode(__stdcall *)(int32_t, char*, uint32_t, _uint32_t*, uint32_t*);
 _get_kana.restype = ctypes.c_int32
-_get_kana.argtypes = (ctypes.c_int32, ctypes.c_char_p, ctypes.c_uint32, ctypes.POINTER(ctypes.c_uint32), ctypes.POINTER(ctypes.c_uint32))
+_get_kana.argtypes = (ctypes.c_int32, ctypes.c_void_p, ctypes.c_uint32, ctypes.POINTER(ctypes.c_uint32), ctypes.POINTER(ctypes.c_uint32))
 
 # using Type_AITalkAPI_GetParam = AITalkResultCode(__stdcall *)(AITalk_TTtsParam*, uint32_t*);
 _get_param.restype = ctypes.c_int32
