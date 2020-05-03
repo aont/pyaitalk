@@ -7,7 +7,8 @@ import enum
 import threading
 import time
 
-import win32event
+import subprocess
+# import win32event
 import win32con
 
 install_path = os.environ["AITALK_PATH"]
@@ -107,7 +108,8 @@ class UserData:
         self.kana_output = None
         self.speech_buffer = ctypes.create_string_buffer(SPEECH_BUFFER_SIZE*2)
         self.speech_output = None
-        self.close_event_handle = win32event.CreateEvent(None, True, False, None)
+        # self.close_event_handle = win32event.CreateEvent(None, True, False, None)
+        self.close_event_handle = threading.Event()
 
 ProcTextBuf = ctypes.WINFUNCTYPE(ctypes.c_int32, ctypes.c_int32, ctypes.c_int32, ctypes.py_object)
 ProcRawBuf = ctypes.WINFUNCTYPE(ctypes.c_int32, ctypes.c_int32, ctypes.c_int32, ctypes.c_uint64, ctypes.py_object)
@@ -211,35 +213,33 @@ class JobParam(ctypes.Structure):
     )
 
 
-def text_to_kana(user_data, text, timeout=0xFFFFFFFF):
+def text_to_kana(user_data, text, timeout=None):
     text_encoded = text.encode(ENCODING)
-    win32event.ResetEvent(user_data.close_event_handle)
+    user_data.close_event_handle.clear()
     user_data.kana_output = b''
     job_param = JobParam()
     job_param.mode_io = JobIOMode.PLAIN_TO_AIKANA
     job_param.user_data = user_data
     job_id = ctypes.c_int32()
     raise_for_result(_text_to_kana(ctypes.byref(job_id), ctypes.byref(job_param), text_encoded))
-    wait_result = win32event.WaitForSingleObject(user_data.close_event_handle, timeout)
+    wait_result = user_data.close_event_handle.wait(timeout)
     raise_for_result(_close_kana(job_id, 0))
-    if wait_result != win32con.WAIT_OBJECT_0:
+    if not wait_result:
         raise Exception("text_to_kana timeout")
     return user_data.kana_output.decode(ENCODING)
 
-def kana_to_speech(user_data, kana, timeout=0xFFFFFFFF):
+def kana_to_speech(user_data, kana, timeout=None):
     kana_encoded = kana.encode(ENCODING)
-    user_data.speech_output = b''
-    win32event.ResetEvent(user_data.close_event_handle)
+    user_data.close_event_handle.clear()
     job_param = JobParam()
     job_param.mode_io = JobIOMode.AIKANA_TO_WAVE
     job_param.user_data = user_data
     job_id = ctypes.c_int32()
     raise_for_result(_text_to_speech(ctypes.byref(job_id), ctypes.byref(job_param), kana_encoded))
-    wait_result = win32event.WaitForSingleObject(user_data.close_event_handle, timeout)
+    wait_result = user_data.close_event_handle.wait(timeout)
     raise_for_result(_close_speech(job_id, 0))
-    if wait_result != win32con.WAIT_OBJECT_0:
+    if not wait_result:
         raise Exception("text_to_kana timeout")
-    return user_data.speech_output
 
 def callback_text_buf(reason_code, job_id, user_data):
     if reason_code in (EventReasonCode.TEXTBUF_FULL, EventReasonCode.TEXTBUF_FLUSH, EventReasonCode.TEXTBUF_CLOSE):
@@ -256,7 +256,8 @@ def callback_text_buf(reason_code, job_id, user_data):
                 break
         if reason_code != EventReasonCode.TEXTBUF_CLOSE:
             return 0
-    win32event.SetEvent(user_data.close_event_handle)
+    # win32event.SetEvent(user_data.close_event_handle)
+    user_data.close_event_handle.set()
     return 0
 callback_text_buf_ptr = ProcTextBuf(callback_text_buf)
 
@@ -269,13 +270,14 @@ def callback_raw_buf(reason_code, job_id, tick, user_data):
             result = _get_data(job_id, buffer, buffer_size, ctypes.byref(read_samples))
             if result != Err.SUCCESS:
                 break
-            user_data.speech_output += user_data.speech_buffer[:read_samples.value*2]
+            user_data.speech_output.write(buffer[:read_samples.value*2])
             if buffer_size > read_samples.value:
                 break
         if reason_code != EventReasonCode.RAWBUF_CLOSE:
             return 0
-    win32event.SetEvent(user_data.close_event_handle)
+    user_data.close_event_handle.set()
     return 0
+
 callback_raw_buf_ptr = ProcRawBuf(callback_raw_buf)
 
 def callback_event_tts(reason_code, job_id, tick, name, user_data):
@@ -304,6 +306,7 @@ def voice_load(voice_name):
     param.proc_text_buf = callback_text_buf_ptr
     param.proc_raw_buf = callback_raw_buf_ptr
     param.proc_event_tts = callback_event_tts_ptr
+    param.PROC = "a"
 
     param.extend_format = ExtendedFormat.JEITA_RUBY | ExtendedFormat.AUTO_BOOKMARK
     
