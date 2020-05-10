@@ -230,6 +230,7 @@ def init(auth_code):
 def lang_load(language_name):
     language_path = os.path.join(os.path.join(install_path, "Lang"), language_name)
     cwd_save = os.getcwd()
+    
     os.chdir(install_path)
     result = _lang_load(language_path.encode(ENCODING))
     os.chdir(cwd_save)
@@ -267,7 +268,7 @@ def gen_text_to_kana_data(outfile):
     return ConversionData(outfile, KANA_BUFFER_SIZE)
 
 def text_to_kana(text, timeout=win32event.INFINITE):
-    text_encoded = text.encode(ENCODING)
+    text_encoded = text.encode(ENCODING, errors='ignore')
     with io.BytesIO() as outfile, gen_text_to_kana_data(outfile) as user_data:
         job_param = JobParam()
         job_param.mode_io = JobIOMode.PLAIN_TO_AIKANA

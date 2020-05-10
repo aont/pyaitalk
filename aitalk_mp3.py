@@ -37,7 +37,7 @@ def summarize_text(text):
 
 def main():
     sys.stderr.write("[debug] pid=%s\n"%os.getpid())
-    outmp3fn = "test.mp3"
+    outmp3fn = sys.argv[1]
 
     auth_code = os.environ["AITALK_AUTHCODE"]
     aitalk.init(auth_code)
@@ -45,12 +45,13 @@ def main():
         aitalk.lang_load("standard")
         aitalk.voice_load("nozomi_22")
 
-        text = "こんにちは。今日はいい天気ですね。"*100
-        sys.stderr.write("[debug] text=\n%s\n" % summarize_text(text))
+        # text = "こんにちは。今日はいい天気ですね。"*100
+        text = sys.stdin.read()
+        # sys.stderr.write("[debug] text=\n%s\n" % summarize_text(text))
 
         sys.stderr.write("[debug] text_to_kana\n")
         kana = aitalk.text_to_kana(text)
-        sys.stderr.write("[debug] kana=\n%s\n" % summarize_text(kana))
+        # sys.stderr.write("[debug] kana=\n%s\n" % summarize_text(kana))
 
         sys.stderr.write("[debug] launch lame\n")
         with Lame(outmp3fn) as lame:
