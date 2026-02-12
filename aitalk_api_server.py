@@ -5,12 +5,16 @@ import argparse
 import asyncio
 import base64
 import io
+import logging
 import os
 import wave
 
 from aiohttp import web
 
 import aitalk
+
+
+logger = logging.getLogger(__name__)
 
 
 class AITalkApiService:
@@ -31,28 +35,41 @@ class AITalkApiService:
 
     async def init(self, auth_code):
         async with self._lock:
+            logger.debug("Initializing engine")
             aitalk.init(auth_code)
             self._initialized = True
             self._loaded_language = None
             self._loaded_voice = None
+            logger.debug("Engine initialized")
 
     async def lang_load(self, language):
         async with self._lock:
             self._require_initialized()
+            logger.debug("Loading language: %s", language)
             aitalk.lang_load(language)
             self._loaded_language = language
+            logger.debug("Language loaded: %s", language)
 
     async def voice_load(self, voice):
         async with self._lock:
             self._require_initialized()
+            logger.debug("Loading voice: %s", voice)
             aitalk.voice_load(voice)
             self._loaded_voice = voice
+            logger.debug("Voice loaded: %s", voice)
 
     async def ensure_character(self, voice):
         async with self._lock:
             self._require_initialized()
             if self._loaded_voice == voice:
+                logger.debug("Character already loaded: %s", voice)
                 return
+
+            logger.debug(
+                "Switching character from %s to %s by restarting engine",
+                self._loaded_voice,
+                voice,
+            )
 
             aitalk.end()
             self._initialized = False
@@ -80,18 +97,23 @@ class AITalkApiService:
             elif entry.is_file():
                 voices.add(os.path.splitext(entry.name)[0])
 
-        return sorted(voices)
+        sorted_voices = sorted(voices)
+        logger.debug("Discovered %s voices", len(sorted_voices))
+        return sorted_voices
 
     async def text_to_kana(self, text):
         async with self._lock:
             self._require_initialized()
+            logger.debug("Converting text to kana (chars=%s)", len(text))
             return await aitalk.text_to_kana(text)
 
     async def kana_to_speech(self, kana):
         async with self._lock:
             self._require_initialized()
+            logger.debug("Converting kana to speech (chars=%s)", len(kana))
             out = io.BytesIO()
             await aitalk.kana_to_speech(kana, out)
+            logger.debug("Generated speech bytes=%s", out.tell())
             return out.getvalue()
 
     async def synthesize_text_to_pcm(self, text):
@@ -101,10 +123,12 @@ class AITalkApiService:
     async def end(self):
         async with self._lock:
             if self._initialized:
+                logger.debug("Shutting down engine")
                 aitalk.end()
                 self._initialized = False
                 self._loaded_language = None
                 self._loaded_voice = None
+                logger.debug("Engine shutdown complete")
 
     def _require_initialized(self):
         if not self._initialized:
@@ -114,10 +138,12 @@ class AITalkApiService:
 @web.middleware
 async def error_middleware(request, handler):
     try:
+        logger.debug("Incoming request: %s %s", request.method, request.path)
         return await handler(request)
     except web.HTTPException:
         raise
     except Exception as exc:  # noqa: BLE001
+        logger.exception("Unhandled error while processing %s %s", request.method, request.path)
         return web.json_response({"error": str(exc)}, status=400)
 
 
@@ -139,11 +165,13 @@ async def handle_health(request):
 async def handle_lang_load(request):
     body = await _read_json(request)
     language = body.get("language", "standard")
+    logger.debug("/lang/load language=%s", language)
     await request.app["service"].lang_load(language)
     return json_response_ok(language=language)
 
 
 async def handle_voice_list(request):
+    logger.debug("/voice/list")
     voices = await request.app["service"].list_voices()
     return json_response_ok(voices=voices)
 
@@ -153,6 +181,7 @@ async def handle_text_to_kana(request):
     text = body.get("text")
     if text is None:
         raise web.HTTPBadRequest(text="text is required")
+    logger.debug("/text-to-kana text chars=%s", len(text))
     kana = await request.app["service"].text_to_kana(text)
     return json_response_ok(kana=kana)
 
@@ -162,6 +191,7 @@ async def handle_kana_to_speech(request):
     kana = body.get("kana")
     if kana is None:
         raise web.HTTPBadRequest(text="kana is required")
+    logger.debug("/kana-to-speech kana chars=%s", len(kana))
     pcm = await request.app["service"].kana_to_speech(kana)
 
     output = body.get("output", "binary")
@@ -193,7 +223,10 @@ async def handle_synthesize(request):
 
     character = body.get("character")
     if character:
+        logger.debug("/synthesize character override=%s", character)
         await request.app["service"].ensure_character(character)
+
+    logger.debug("/synthesize text chars=%s output=%s", len(text), body.get("output", "wav"))
 
     pcm = await request.app["service"].synthesize_text_to_pcm(text)
     output = body.get("output", "wav")
@@ -270,6 +303,11 @@ def parse_args(argv=None):
         default="nozomi_22",
         help="voice used at startup initialization",
     )
+    parser.add_argument(
+        "--debug",
+        action="store_true",
+        help="enable verbose debug logging",
+    )
     return parser.parse_args(argv)
 
 
@@ -294,6 +332,10 @@ async def _start(args):
 
 def main(argv=None):
     args = parse_args(argv)
+    logging.basicConfig(
+        level=logging.DEBUG if args.debug else logging.INFO,
+        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+    )
     asyncio.run(_start(args))
 
 
