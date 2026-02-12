@@ -41,6 +41,9 @@ Main options:
 
 HTTP API 経由で合成するCLI:
 
+> `aitalk_http_wav.py` は `/synthesize` が「未初期化」エラーを返した場合、`/init`→`/lang/load`→`/voice/load` を自動で試行して再実行します。
+
+
 ```bash
 echo こんにちは | python aitalk_http_wav.py out.wav
 ```
@@ -50,6 +53,9 @@ echo こんにちは | python aitalk_http_wav.py out.wav
 - `--api-url`: API ベースURL (default: `http://127.0.0.1:8080`)
 - `--timeout`: HTTPタイムアウト秒数
 - `--input-encoding`: stdin テキストエンコーディング (default: auto-detect)
+- `--auth-code`: API未初期化時の自動初期化に使う認証コード (default: `AITALK_AUTHCODE`)
+- `--language`: API未初期化時の自動初期化で使う言語 (default: `standard`)
+- `--voice`: API未初期化時の自動初期化で使う音声 (default: `nozomi_22`)
 
 ## HTTP API server (`aiohttp`)
 

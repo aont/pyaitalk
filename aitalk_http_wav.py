@@ -4,6 +4,7 @@
 import argparse
 import json
 import locale
+import os
 import sys
 import urllib.error
 import urllib.request
@@ -77,23 +78,65 @@ def parse_args(argv=None):
         type=float,
         help="HTTP request timeout in seconds (default: 60)",
     )
+    parser.add_argument(
+        "--auth-code",
+        default=os.environ.get("AITALK_AUTHCODE"),
+        help="Auth code used for lazy initialization when the API is not initialized.",
+    )
+    parser.add_argument(
+        "--language",
+        default="standard",
+        help="Language profile used for lazy initialization (default: standard)",
+    )
+    parser.add_argument(
+        "--voice",
+        default="nozomi_22",
+        help="Voice used for lazy initialization (default: nozomi_22)",
+    )
     return parser.parse_args(argv)
 
 
-def synthesize_wav(api_url, text, timeout):
-    payload = json.dumps({"text": text, "output": "wav"}).encode("utf-8")
+def post_json(api_url, endpoint, payload, timeout):
     request = urllib.request.Request(
-        url=f"{api_url.rstrip('/')}/synthesize",
-        data=payload,
+        url=f"{api_url.rstrip('/')}/{endpoint.lstrip('/')}",
+        data=json.dumps(payload).encode("utf-8"),
         headers={"content-type": "application/json"},
         method="POST",
     )
+    with urllib.request.urlopen(request, timeout=timeout) as response:
+        return response.read()
+
+
+def ensure_initialized(api_url, timeout, auth_code, language, voice):
+    if not auth_code:
+        raise RuntimeError(
+            "API is not initialized; provide --auth-code or set AITALK_AUTHCODE "
+            "for automatic initialization"
+        )
+
+    post_json(api_url, "/init", {"auth_code": auth_code}, timeout)
+    post_json(api_url, "/lang/load", {"language": language}, timeout)
+    post_json(api_url, "/voice/load", {"voice": voice}, timeout)
+
+
+def synthesize_wav(api_url, text, timeout):
+    return post_json(api_url, "/synthesize", {"text": text, "output": "wav"}, timeout)
+
+
+def synthesize_wav_with_lazy_init(api_url, text, timeout, auth_code, language, voice):
     try:
-        with urllib.request.urlopen(request, timeout=timeout) as response:
-            return response.read()
+        return synthesize_wav(api_url, text, timeout)
     except urllib.error.HTTPError as exc:
         detail = exc.read().decode("utf-8", errors="replace")
-        raise RuntimeError(f"HTTP {exc.code} from API: {detail}") from exc
+        if exc.code != 400 or "engine is not initialized" not in detail:
+            raise RuntimeError(f"HTTP {exc.code} from API: {detail}") from exc
+
+        try:
+            ensure_initialized(api_url, timeout, auth_code, language, voice)
+            return synthesize_wav(api_url, text, timeout)
+        except urllib.error.HTTPError as init_exc:
+            init_detail = init_exc.read().decode("utf-8", errors="replace")
+            raise RuntimeError(f"HTTP {init_exc.code} from API: {init_detail}") from init_exc
     except urllib.error.URLError as exc:
         raise RuntimeError(f"failed to connect to API: {exc.reason}") from exc
 
@@ -104,7 +147,14 @@ def main(argv=None):
     raw_text = sys.stdin.buffer.read()
     text = decode_input_text(raw_text, args.input_encoding)
 
-    wav_bytes = synthesize_wav(args.api_url, text, args.timeout)
+    wav_bytes = synthesize_wav_with_lazy_init(
+        args.api_url,
+        text,
+        args.timeout,
+        args.auth_code,
+        args.language,
+        args.voice,
+    )
     with open(args.output, "wb") as output_file:
         output_file.write(wav_bytes)
     return 0
