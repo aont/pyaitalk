@@ -41,16 +41,19 @@ Main options:
 
 CLI for synthesis via HTTP API:
 
-> `aitalk_http_wav.py` calls `/synthesize` and assumes the server has already been initialized.
+> `aitalk_http_wav.py` calls `/synthesize` and can query `/voice/list` to show available characters.
 
 
 ```bash
-echo こんにちは | python aitalk_http_wav.py out.wav
+echo こんにちは | python aitalk_http_wav.py --character nozomi_22 out.wav
+python aitalk_http_wav.py --list-characters
 ```
 
 Main options:
 
 - `--api-url`: API base URL (default: `http://127.0.0.1:8080`)
+- `--character`: character/voice name to load before synthesis
+- `--list-characters`: list available characters from the API and exit
 - `--timeout`: HTTP timeout in seconds
 - `--input-encoding`: stdin text encoding (default: auto-detect)
 
@@ -73,6 +76,7 @@ Endpoints:
 - `GET /health`
 - `POST /lang/load` `{ "language": "standard" }`
 - `POST /voice/load` `{ "voice": "nozomi_22" }`
+- `GET /voice/list`
 - `POST /text-to-kana` `{ "text": "こんにちは" }`
 - `POST /kana-to-speech` `{ "kana": "...", "output": "binary|base64" }`
 - `POST /synthesize` `{ "text": "こんにちは", "output": "wav|pcm|base64" }`

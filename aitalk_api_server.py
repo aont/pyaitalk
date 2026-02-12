@@ -42,6 +42,22 @@ class AITalkApiService:
             self._require_initialized()
             aitalk.voice_load(voice)
 
+    async def list_voices(self):
+        voice_dir = os.path.join(aitalk.install_path, aitalk.voice_db_dir)
+        if not os.path.isdir(voice_dir):
+            raise RuntimeError(f"voice directory not found: {voice_dir}")
+
+        voices = set()
+        for entry in os.scandir(voice_dir):
+            if entry.name.startswith('.'):
+                continue
+            if entry.is_dir():
+                voices.add(entry.name)
+            elif entry.is_file():
+                voices.add(os.path.splitext(entry.name)[0])
+
+        return sorted(voices)
+
     async def text_to_kana(self, text):
         async with self._lock:
             self._require_initialized()
@@ -106,6 +122,11 @@ async def handle_voice_load(request):
     voice = body.get("voice", "nozomi_22")
     await request.app["service"].voice_load(voice)
     return json_response_ok(voice=voice)
+
+
+async def handle_voice_list(request):
+    voices = await request.app["service"].list_voices()
+    return json_response_ok(voices=voices)
 
 
 async def handle_text_to_kana(request):
@@ -199,6 +220,7 @@ def create_app(args):
             web.get("/health", handle_health),
             web.post("/lang/load", handle_lang_load),
             web.post("/voice/load", handle_voice_load),
+            web.get("/voice/list", handle_voice_list),
             web.post("/text-to-kana", handle_text_to_kana),
             web.post("/kana-to-speech", handle_kana_to_speech),
             web.post("/synthesize", handle_synthesize),

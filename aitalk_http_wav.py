@@ -60,7 +60,7 @@ def parse_args(argv=None):
     parser = argparse.ArgumentParser(
         description="Read text from stdin and request speech synthesis over HTTP API.",
     )
-    parser.add_argument("output", help="Output WAV file path")
+    parser.add_argument("output", nargs="?", help="Output WAV file path")
     parser.add_argument(
         "--api-url",
         default=DEFAULT_API_URL,
@@ -76,6 +76,16 @@ def parse_args(argv=None):
         default=60,
         type=float,
         help="HTTP request timeout in seconds (default: 60)",
+    )
+    parser.add_argument(
+        "--character",
+        default=None,
+        help="Character (voice) name to use for this request.",
+    )
+    parser.add_argument(
+        "--list-characters",
+        action="store_true",
+        help="List available characters (voices) from HTTP API and exit.",
     )
     return parser.parse_args(argv)
 
@@ -95,8 +105,24 @@ def synthesize_wav(api_url, text, timeout):
     return post_json(api_url, "/synthesize", {"text": text, "output": "wav"}, timeout)
 
 
-def synthesize_wav_or_raise(api_url, text, timeout):
+def select_character(api_url, character, timeout):
+    return post_json(api_url, "/voice/load", {"voice": character}, timeout)
+
+
+def fetch_characters(api_url, timeout):
+    request = urllib.request.Request(
+        url=f"{api_url.rstrip('/')}/voice/list",
+        method="GET",
+    )
+    with urllib.request.urlopen(request, timeout=timeout) as response:
+        body = json.loads(response.read().decode("utf-8"))
+    return body.get("voices", [])
+
+
+def synthesize_wav_or_raise(api_url, text, timeout, character=None):
     try:
+        if character:
+            select_character(api_url, character, timeout)
         return synthesize_wav(api_url, text, timeout)
     except urllib.error.HTTPError as exc:
         detail = exc.read().decode("utf-8", errors="replace")
@@ -108,10 +134,31 @@ def synthesize_wav_or_raise(api_url, text, timeout):
 def main(argv=None):
     args = parse_args(argv)
 
+    if args.list_characters:
+        try:
+            voices = fetch_characters(args.api_url, args.timeout)
+        except urllib.error.HTTPError as exc:
+            detail = exc.read().decode("utf-8", errors="replace")
+            raise RuntimeError(f"HTTP {exc.code} from API: {detail}") from exc
+        except urllib.error.URLError as exc:
+            raise RuntimeError(f"failed to connect to API: {exc.reason}") from exc
+
+        for voice in voices:
+            print(voice)
+        return 0
+
+    if not args.output:
+        raise ValueError("output is required unless --list-characters is specified")
+
     raw_text = sys.stdin.buffer.read()
     text = decode_input_text(raw_text, args.input_encoding)
 
-    wav_bytes = synthesize_wav_or_raise(args.api_url, text, args.timeout)
+    wav_bytes = synthesize_wav_or_raise(
+        args.api_url,
+        text,
+        args.timeout,
+        character=args.character,
+    )
     with open(args.output, "wb") as output_file:
         output_file.write(wav_bytes)
     return 0
