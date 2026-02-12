@@ -34,6 +34,7 @@ Main options:
 - `--voice`: voice name (default: `nozomi_22`)
 - `--language`: language profile (default: `standard`)
 - `--auth-code`: auth code
+- `--input-encoding`: stdin text encoding (default: auto-detect)
 
 ## Python API example
 
