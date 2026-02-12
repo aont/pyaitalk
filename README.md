@@ -39,20 +39,20 @@ Main options:
 - `--input-encoding`: stdin text encoding (default: auto-detect)
 
 
-HTTP API 経由で合成するCLI:
+CLI for synthesis via HTTP API:
 
-> `aitalk_http_wav.py` はサーバー側で初期化済みであることを前提に `/synthesize` を呼び出します。
+> `aitalk_http_wav.py` calls `/synthesize` and assumes the server has already been initialized.
 
 
 ```bash
 echo こんにちは | python aitalk_http_wav.py out.wav
 ```
 
-主なオプション:
+Main options:
 
-- `--api-url`: API ベースURL (default: `http://127.0.0.1:8080`)
-- `--timeout`: HTTPタイムアウト秒数
-- `--input-encoding`: stdin テキストエンコーディング (default: auto-detect)
+- `--api-url`: API base URL (default: `http://127.0.0.1:8080`)
+- `--timeout`: HTTP timeout in seconds
+- `--input-encoding`: stdin text encoding (default: auto-detect)
 
 ## HTTP API server (`aiohttp`)
 
