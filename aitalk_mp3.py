@@ -1,10 +1,10 @@
 #!/usr/bin/env python3_32
-"""CLI utility: synthesize stdin text to an MP3 file using aitalked.dll + lame."""
+"""CLI utility: synthesize stdin text to a WAV file using aitalked.dll."""
 
 import argparse
 import os
-import subprocess
 import sys
+import wave
 
 import aitalk
 
@@ -12,50 +12,33 @@ DEFAULT_LANGUAGE = "standard"
 DEFAULT_VOICE = "nozomi_22"
 
 
-class Lame:
-    """Context manager for a running lame encoder process."""
+class WavWriter:
+    """Context manager for writing AI Talk raw PCM into a WAV file."""
 
-    def __init__(self, outmp3fn):
-        self.proc = subprocess.Popen(
-            (
-                "lame",
-                "--silent",
-                "-r",
-                "-s",
-                "22050",
-                "--signed",
-                "-m",
-                "m",
-                "-q",
-                "0",
-                "--vbr-old",
-                "-V",
-                "4",
-                "-",
-                outmp3fn,
-            ),
-            stdin=subprocess.PIPE,
-            creationflags=subprocess.CREATE_NEW_PROCESS_GROUP,
-        )
+    def __init__(self, outwavfn):
+        self.wave_file = wave.open(outwavfn, "wb")
+        self.wave_file.setnchannels(1)
+        self.wave_file.setsampwidth(2)
+        self.wave_file.setframerate(aitalk.VOICE_SAMPLERATE)
 
     def stdin(self):
-        return self.proc.stdin
+        return self
+
+    def write(self, data):
+        self.wave_file.writeframesraw(data)
 
     def __enter__(self):
         return self
 
     def __exit__(self, exc_type, exc_value, traceback):
-        self.proc.stdin.close()
-        ret = self.proc.wait()
-        if ret != 0:
-            raise Exception("lame exited with status code %s" % ret)
+        self.wave_file.close()
 
 
 def parse_args(argv=None):
     parser = argparse.ArgumentParser(
-        description="Read UTF-8 text from stdin and output speech MP3.",
+        description="Read UTF-8 text from stdin and output speech WAV.",
     )
-    parser.add_argument("output", help="Output MP3 file path")
+    parser.add_argument("output", help="Output WAV file path")
     parser.add_argument(
         "--language",
         default=DEFAULT_LANGUAGE,
@@ -83,8 +66,8 @@ def main(argv=None):
     text = sys.stdin.read()
     with aitalk.AITalkSession(args.auth_code, language=args.language, voice=args.voice) as session:
         kana = session.text_to_kana(text)
-        with Lame(args.output) as lame:
-            aitalk.kana_to_speech(kana, lame.stdin())
+        with WavWriter(args.output) as wav_writer:
+            aitalk.kana_to_speech(kana, wav_writer.stdin())
 
     return 0
 

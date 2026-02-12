@@ -5,13 +5,12 @@ Python bindings and CLI utilities for `aitalked.dll`.
 ## Repository layout
 
 - `aitalk.py`: `ctypes` bindings for `aitalked.dll` plus a small high-level session API
-- `aitalk_mp3.py`: CLI that converts stdin text into MP3 output
+- `aitalk_mp3.py`: CLI that converts stdin text into WAV output
 
 ## Requirements
 
 - Windows
 - A local installation that provides `aitalked.dll`
-- `lame` available on `PATH` (used by `aitalk_mp3.py` for MP3 encoding)
 
 ## Environment variables
 
@@ -21,7 +20,7 @@ Python bindings and CLI utilities for `aitalked.dll`.
 ## CLI usage
 
 ```bash
-echo hello | python aitalk_mp3.py out.mp3
+echo hello | python aitalk_mp3.py out.wav
 ```
 
 Show all options:
