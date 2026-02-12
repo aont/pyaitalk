@@ -22,7 +22,7 @@ Python bindings and CLI utilities for `aitalked.dll`.
 ## CLI usage
 
 ```bash
-echo hello | python aitalk_wav.py out.wav
+echo "こんにちは" | python aitalk_wav.py out.wav
 ```
 
 Show all options:
