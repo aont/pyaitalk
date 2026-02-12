@@ -1,0 +1,31 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "pyaitalk"
+version = "0.1.0"
+description = "Python bindings and CLI utilities for aitalked.dll"
+readme = "README.md"
+requires-python = ">=3.8"
+license = { file = "LICENSE" }
+authors = [
+  { name = "aont" },
+]
+classifiers = [
+  "Programming Language :: Python :: 3",
+  "Operating System :: Microsoft :: Windows",
+  "License :: OSI Approved :: MIT License",
+]
+keywords = ["aitalk", "tts", "ctypes", "windows"]
+
+[project.urls]
+Homepage = "https://github.com/aont/pyaitalk/"
+Repository = "https://github.com/aont/pyaitalk/"
+Issues = "https://github.com/aont/pyaitalk/issues"
+
+[project.scripts]
+aitalk-wav = "aitalk_wav:main"
+
+[tool.setuptools]
+py-modules = ["aitalk", "aitalk_wav"]
