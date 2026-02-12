@@ -1,64 +1,93 @@
 #!/usr/bin/env python3_32
+"""CLI utility: synthesize stdin text to an MP3 file using aitalked.dll + lame."""
 
+import argparse
 import os
-import sys
-import aitalk
 import subprocess
+import sys
+
+import aitalk
+
+DEFAULT_LANGUAGE = "standard"
+DEFAULT_VOICE = "nozomi_22"
+
 
 class Lame:
+    """Context manager for a running lame encoder process."""
+
     def __init__(self, outmp3fn):
-        self.proc = subprocess.Popen(("lame", "--silent", "-r", "-s", "22050", "--signed", "-m", "m", "-q", "0", "--vbr-old", "-V", "4", "-", outmp3fn), stdin=subprocess.PIPE, creationflags=subprocess.CREATE_NEW_PROCESS_GROUP)
+        self.proc = subprocess.Popen(
+            (
+                "lame",
+                "--silent",
+                "-r",
+                "-s",
+                "22050",
+                "--signed",
+                "-m",
+                "m",
+                "-q",
+                "0",
+                "--vbr-old",
+                "-V",
+                "4",
+                "-",
+                outmp3fn,
+            ),
+            stdin=subprocess.PIPE,
+            creationflags=subprocess.CREATE_NEW_PROCESS_GROUP,
+        )
+
     def stdin(self):
         return self.proc.stdin
+
     def __enter__(self):
         return self
+
     def __exit__(self, exc_type, exc_value, traceback):
         self.proc.stdin.close()
         ret = self.proc.wait()
-        if ret!=0:
-            raise Exception("lame exited with status code %s"%ret)
+        if ret != 0:
+            raise Exception("lame exited with status code %s" % ret)
 
-class DoOnExit:
-    def __init__(self, func, argv=()):
-        self.func = func
-        self.argv = argv
-    def __enter__(self):
-        return self
-    def __exit__(self, exc_type, exc_value, traceback):
-        self.func(*self.argv)
 
-def summarize_text(text):
-    size_half = 30
-    text_omit = "\n   ...\n"
-    if len(text)>(2*size_half+len(text_omit)):
-        return text[:size_half] + text_omit + text[-size_half:]
-    else:
-        return text
+def parse_args(argv=None):
+    parser = argparse.ArgumentParser(
+        description="Read UTF-8 text from stdin and output speech MP3.",
+    )
+    parser.add_argument("output", help="Output MP3 file path")
+    parser.add_argument(
+        "--language",
+        default=DEFAULT_LANGUAGE,
+        help=f"Language profile to load (default: {DEFAULT_LANGUAGE})",
+    )
+    parser.add_argument(
+        "--voice",
+        default=DEFAULT_VOICE,
+        help=f"Voice name to load (default: {DEFAULT_VOICE})",
+    )
+    parser.add_argument(
+        "--auth-code",
+        default=os.environ.get("AITALK_AUTHCODE"),
+        help="Auth code. Defaults to AITALK_AUTHCODE environment variable.",
+    )
+    return parser.parse_args(argv)
 
-def main():
-    sys.stderr.write("[debug] pid=%s\n"%os.getpid())
-    outmp3fn = sys.argv[1]
 
-    auth_code = os.environ["AITALK_AUTHCODE"]
-    aitalk.init(auth_code)
-    with DoOnExit(aitalk.end):
-        aitalk.lang_load("standard")
-        aitalk.voice_load("nozomi_22")
+def main(argv=None):
+    args = parse_args(argv)
 
-        # text = "こんにちは。今日はいい天気ですね。"*100
-        text = sys.stdin.read()
-        # sys.stderr.write("[debug] text=\n%s\n" % summarize_text(text))
+    if not args.auth_code:
+        raise ValueError("auth code is required (use --auth-code or AITALK_AUTHCODE)")
 
-        sys.stderr.write("[debug] text_to_kana\n")
-        kana = aitalk.text_to_kana(text)
-        # sys.stderr.write("[debug] kana=\n%s\n" % summarize_text(kana))
-
-        sys.stderr.write("[debug] launch lame\n")
-        with Lame(outmp3fn) as lame:
-            sys.stderr.write("[debug] kana_to_speech\n")
+    text = sys.stdin.read()
+    with aitalk.AITalkSession(args.auth_code, language=args.language, voice=args.voice) as session:
+        kana = session.text_to_kana(text)
+        with Lame(args.output) as lame:
             aitalk.kana_to_speech(kana, lame.stdin())
-    
-    sys.stderr.write("[debug] finished\n")
 
-if __name__ == '__main__':
+    return 0
+
+
+if __name__ == "__main__":
     sys.exit(main())

@@ -1,11 +1,19 @@
 #!/usr/bin/env python3_32
+"""`aitalked.dll` API wrapper.
+
+This module provides low-level bindings around ``aitalked.dll`` and a small,
+high-level interface for common use cases:
+
+* initialize engine
+* load language and voice
+* convert text to kana
+* convert kana to raw PCM audio
+"""
 
 import os
 import sys
 import ctypes
 import enum
-import threading
-import time
 import signal
 import io
 
@@ -14,6 +22,17 @@ import win32api
 import win32event
 import win32con
 
+__all__ = [
+    "AITalkSession",
+    "end",
+    "init",
+    "kana_to_speech",
+    "lang_load",
+    "synthesize_text_to_stream",
+    "text_to_kana",
+    "voice_load",
+]
+
 install_path = os.environ["AITALK_PATH"]
 voice_db_dir = "Voice"
 license_path = "aitalk.lic"
@@ -21,6 +40,7 @@ license_path = "aitalk.lic"
 aitalked_dll = ctypes.WinDLL(os.path.join(install_path, "aitalked.dll"))
 
 class DoOnExit:
+    """Call a function when leaving a context."""
     def __init__(self, func, argv=()):
         self.func = func
         self.argv = argv
@@ -36,6 +56,7 @@ def gen_sigint_handler(sigint_event):
     return sigint_handler
 
 def wait_complete(close_event_handle, timeout=win32event.INFINITE):
+    """Wait for a conversion callback event and support Ctrl+C interruption."""
     sigint_handler_save = signal.getsignal(signal.SIGINT)
     sigint_event = win32event.CreateEvent(None, True, False, None)
     with \
@@ -208,6 +229,7 @@ TtsParam1 = gen_TtsParam(1)
 TtsParam0 = gen_TtsParam(0)
 
 def raise_for_result(code):
+    """Raise ``Exception`` when a dll error code is returned."""
     if code!=Err.SUCCESS:
         for e in Err:
             if e.value == code:
@@ -216,6 +238,11 @@ def raise_for_result(code):
             raise Exception("code: %s" % (code, ))
 
 def init(auth_code):
+    """Initialize the engine.
+
+    Args:
+        auth_code: Authorization code (seed) for the runtime.
+    """
     config = Config()
     config.hz_voice_db = VOICE_SAMPLERATE
     config.dir_voice_dbs = os.path.join(install_path, voice_db_dir).encode(ENCODING)
@@ -228,6 +255,7 @@ def init(auth_code):
 
 
 def lang_load(language_name):
+    """Load a language profile from ``<AITALK_PATH>/Lang``."""
     language_path = os.path.join(os.path.join(install_path, "Lang"), language_name)
     cwd_save = os.getcwd()
     
@@ -268,6 +296,7 @@ def gen_text_to_kana_data(outfile):
     return ConversionData(outfile, KANA_BUFFER_SIZE)
 
 def text_to_kana(text, timeout=win32event.INFINITE):
+    """Convert plain text to AIKANA text."""
     text_encoded = text.encode(ENCODING, errors='ignore')
     with io.BytesIO() as outfile, gen_text_to_kana_data(outfile) as user_data:
         job_param = JobParam()
@@ -284,6 +313,7 @@ def gen_kana_to_speech_data(file):
     return ConversionData(file, SPEECH_BUFFER_SIZE*2)
 
 def kana_to_speech(kana, outfile, timeout=win32event.INFINITE):
+    """Convert AIKANA text to little-endian 16-bit PCM and write to stream."""
     kana_encoded = kana.encode(ENCODING)
     with gen_kana_to_speech_data(outfile) as user_data:
         job_param = JobParam()
@@ -336,6 +366,7 @@ def callback_event_tts(reason_code, job_id, tick, name, user_data):
 callback_event_tts_ptr = ProcEventTTS(callback_event_tts)
 
 def voice_load(voice_name):
+    """Load a voice and attach conversion callbacks."""
 
     raise_for_result(_voice_load(voice_name.encode(ENCODING)))
     size = ctypes.c_uint32()
@@ -363,7 +394,44 @@ def voice_load(voice_name):
     raise_for_result(_set_param(ctypes.pointer(param)))
 
 def end():
+    """Terminate the engine."""
     raise_for_result(_end())
+
+
+class AITalkSession:
+    """High-level session object for repeated synthesis.
+
+    Example:
+        with AITalkSession(auth_code, language="standard", voice="nozomi_22") as session:
+            session.synthesize("こんにちは", output_stream)
+    """
+
+    def __init__(self, auth_code, language="standard", voice="nozomi_22"):
+        self.auth_code = auth_code
+        self.language = language
+        self.voice = voice
+
+    def __enter__(self):
+        init(self.auth_code)
+        lang_load(self.language)
+        voice_load(self.voice)
+        return self
+
+    def __exit__(self, exc_type, exc_value, traceback):
+        end()
+
+    def text_to_kana(self, text):
+        return text_to_kana(text)
+
+    def synthesize(self, text, outfile):
+        kana = text_to_kana(text)
+        kana_to_speech(kana, outfile)
+
+
+def synthesize_text_to_stream(text, outfile, auth_code, language="standard", voice="nozomi_22"):
+    """Convenience API: initialize -> synthesize -> finalize in one call."""
+    with AITalkSession(auth_code, language=language, voice=voice) as session:
+        session.synthesize(text, outfile)
 
 
 # using Type_AITalkAPI_CloseKana = AITalkResultCode(__stdcall *)(int32_t, int32_t);
@@ -458,7 +526,6 @@ _voice_clear.argtypes = ()
 # using Type_AITalkAPI_VoiceLoad = AITalkResultCode(__stdcall *)(const char*);
 _voice_load.restype = ctypes.c_int32
 _voice_load.argtypes = (ctypes.c_char_p, )
-
 
 
 
