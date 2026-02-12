@@ -15,8 +15,8 @@ import sys
 import ctypes
 from ctypes import wintypes
 import enum
-import signal
 import io
+import asyncio
 
 import subprocess
 
@@ -38,11 +38,6 @@ license_path = "aitalk.lic"
 aitalked_dll = ctypes.WinDLL(os.path.join(install_path, "aitalked.dll"))
 kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
 
-STD_INPUT_HANDLE = -10
-WAIT_OBJECT_0 = 0x00000000
-WAIT_ABANDONED = 0x00000080
-WAIT_TIMEOUT = 0x00000102
-WAIT_FAILED = 0xFFFFFFFF
 INFINITE = 0xFFFFFFFF
 
 
@@ -73,14 +68,6 @@ kernel32.GetStdHandle.argtypes = (wintypes.DWORD,)
 kernel32.SetEvent.restype = wintypes.BOOL
 kernel32.SetEvent.argtypes = (wintypes.HANDLE,)
 
-kernel32.WaitForMultipleObjects.restype = wintypes.DWORD
-kernel32.WaitForMultipleObjects.argtypes = (
-    wintypes.DWORD,
-    ctypes.POINTER(wintypes.HANDLE),
-    wintypes.BOOL,
-    wintypes.DWORD,
-)
-
 
 def create_event(manual_reset=True, initial_state=False, name=None):
     handle = kernel32.CreateEventW(None, manual_reset, initial_state, name)
@@ -94,59 +81,18 @@ def set_event(event_handle):
         raise ctypes.WinError(ctypes.get_last_error())
 
 
-def wait_for_multiple_objects(handles, wait_all=False, timeout=INFINITE):
-    raw_handles = (wintypes.HANDLE * len(handles))(*(h.handle if isinstance(h, WinHandle) else h for h in handles))
-    result = kernel32.WaitForMultipleObjects(len(handles), raw_handles, wait_all, timeout)
-    if result == WAIT_FAILED:
-        raise ctypes.WinError(ctypes.get_last_error())
-    return result
+async def wait_complete(close_event_handle, timeout=INFINITE):
+    """Wait for the conversion completion event using asyncio proactor APIs."""
+    loop = asyncio.get_running_loop()
+    proactor = getattr(loop, "_proactor", None)
+    if proactor is None:
+        raise RuntimeError("Current event loop does not support _proactor")
 
-class DoOnExit:
-    """Call a function when leaving a context."""
-    def __init__(self, func, argv=()):
-        self.func = func
-        self.argv = argv
-    def __enter__(self):
-        return self
-    def __exit__(self, exc_type, exc_value, traceback):
-        self.func(*self.argv)
-
-
-def gen_sigint_handler(sigint_event):
-    def sigint_handler(signum, frame):
-        set_event(sigint_event)
-    return sigint_handler
-
-def wait_complete(close_event_handle, timeout=INFINITE):
-    """Wait for a conversion callback event and support Ctrl+C interruption."""
-    sigint_handler_save = signal.getsignal(signal.SIGINT)
-    sigint_event = create_event(True, False, None)
-    with \
-        DoOnExit(signal.signal, (signal.SIGINT, sigint_handler_save)) , \
-        DoOnExit(sigint_event.close) :
-        stdin_handle = kernel32.GetStdHandle(wintypes.DWORD(STD_INPUT_HANDLE & 0xFFFFFFFF))
-        if stdin_handle in (None, 0, wintypes.HANDLE(-1).value):
-            raise ctypes.WinError(ctypes.get_last_error())
-        signal.signal(signal.SIGINT, gen_sigint_handler(sigint_event))
-        event_array = (sigint_event, close_event_handle, stdin_handle)
-
-        while True:
-            wait_result = wait_for_multiple_objects(event_array, False, timeout)
-            if wait_result == WAIT_TIMEOUT:
-                raise Exception("timeout")
-            elif wait_result == WAIT_OBJECT_0:
-                end()
-                raise Exception("sigint")
-            elif wait_result == WAIT_OBJECT_0 + 1:
-                break
-            elif wait_result == WAIT_OBJECT_0 + 2:
-                continue
-            elif wait_result == WAIT_ABANDONED:
-                raise Exception("WAIT_ABANDONED")
-            elif wait_result == WAIT_TIMEOUT:
-                raise Exception("timeout")
-            else:
-                raise Exception("unexpected wait_result 0x%x" % wait_result)
+    timeout_seconds = None if timeout == INFINITE else timeout / 1000
+    try:
+        await proactor.wait_for_handle(int(close_event_handle.handle), timeout_seconds)
+    except TimeoutError as exc:
+        raise Exception("timeout") from exc
 
 class Err(enum.IntEnum):
     SUCCESS = 0
@@ -359,7 +305,7 @@ class ConversionData():
 def gen_text_to_kana_data(outfile):
     return ConversionData(outfile, KANA_BUFFER_SIZE)
 
-def text_to_kana(text, timeout=INFINITE):
+async def text_to_kana(text, timeout=INFINITE):
     """Convert plain text to AIKANA text."""
     text_encoded = text.encode(ENCODING, errors='ignore')
     with io.BytesIO() as outfile, gen_text_to_kana_data(outfile) as user_data:
@@ -368,7 +314,7 @@ def text_to_kana(text, timeout=INFINITE):
         job_param.user_data = user_data
         job_id = ctypes.c_int32()
         raise_for_result(_text_to_kana(ctypes.byref(job_id), ctypes.byref(job_param), text_encoded))
-        wait_complete(user_data.close_event_handle, timeout)
+        await wait_complete(user_data.close_event_handle, timeout)
         raise_for_result(_close_kana(job_id, 0))
         outfile.seek(0)
         return outfile.read().decode(ENCODING)
@@ -376,7 +322,7 @@ def text_to_kana(text, timeout=INFINITE):
 def gen_kana_to_speech_data(file):
     return ConversionData(file, SPEECH_BUFFER_SIZE*2)
 
-def kana_to_speech(kana, outfile, timeout=INFINITE):
+async def kana_to_speech(kana, outfile, timeout=INFINITE):
     """Convert AIKANA text to little-endian 16-bit PCM and write to stream."""
     kana_encoded = kana.encode(ENCODING)
     with gen_kana_to_speech_data(outfile) as user_data:
@@ -385,7 +331,7 @@ def kana_to_speech(kana, outfile, timeout=INFINITE):
         job_param.user_data = user_data
         job_id = ctypes.c_int32()
         raise_for_result(_text_to_speech(ctypes.byref(job_id), ctypes.byref(job_param), kana_encoded))
-        wait_complete(user_data.close_event_handle, timeout)
+        await wait_complete(user_data.close_event_handle, timeout)
         raise_for_result(_close_speech(job_id, 0))
 
 def callback_text_buf(reason_code, job_id, user_data):
@@ -463,11 +409,11 @@ def end():
 
 
 class AITalkSession:
-    """High-level session object for repeated synthesis.
+    """High-level async session object for repeated synthesis.
 
     Example:
-        with AITalkSession(auth_code, language="standard", voice="nozomi_22") as session:
-            session.synthesize("こんにちは", output_stream)
+        async with AITalkSession(auth_code, language="standard", voice="nozomi_22") as session:
+            await session.synthesize("こんにちは", output_stream)
     """
 
     def __init__(self, auth_code, language="standard", voice="nozomi_22"):
@@ -475,27 +421,27 @@ class AITalkSession:
         self.language = language
         self.voice = voice
 
-    def __enter__(self):
+    async def __aenter__(self):
         init(self.auth_code)
         lang_load(self.language)
         voice_load(self.voice)
         return self
 
-    def __exit__(self, exc_type, exc_value, traceback):
+    async def __aexit__(self, exc_type, exc_value, traceback):
         end()
 
-    def text_to_kana(self, text):
-        return text_to_kana(text)
+    async def text_to_kana(self, text):
+        return await text_to_kana(text)
 
-    def synthesize(self, text, outfile):
-        kana = text_to_kana(text)
-        kana_to_speech(kana, outfile)
+    async def synthesize(self, text, outfile):
+        kana = await text_to_kana(text)
+        await kana_to_speech(kana, outfile)
 
 
-def synthesize_text_to_stream(text, outfile, auth_code, language="standard", voice="nozomi_22"):
+async def synthesize_text_to_stream(text, outfile, auth_code, language="standard", voice="nozomi_22"):
     """Convenience API: initialize -> synthesize -> finalize in one call."""
-    with AITalkSession(auth_code, language=language, voice=voice) as session:
-        session.synthesize(text, outfile)
+    async with AITalkSession(auth_code, language=language, voice=voice) as session:
+        await session.synthesize(text, outfile)
 
 
 # using Type_AITalkAPI_CloseKana = AITalkResultCode(__stdcall *)(int32_t, int32_t);
@@ -590,5 +536,4 @@ _voice_clear.argtypes = ()
 # using Type_AITalkAPI_VoiceLoad = AITalkResultCode(__stdcall *)(const char*);
 _voice_load.restype = ctypes.c_int32
 _voice_load.argtypes = (ctypes.c_char_p, )
-
 
