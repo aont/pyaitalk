@@ -41,7 +41,7 @@ Main options:
 
 HTTP API 経由で合成するCLI:
 
-> `aitalk_http_wav.py` は `/synthesize` が「未初期化」エラーを返した場合、`/init`→`/lang/load`→`/voice/load` を自動で試行して再実行します。
+> `aitalk_http_wav.py` はサーバー側で初期化済みであることを前提に `/synthesize` を呼び出します。
 
 
 ```bash
@@ -53,9 +53,6 @@ echo こんにちは | python aitalk_http_wav.py out.wav
 - `--api-url`: API ベースURL (default: `http://127.0.0.1:8080`)
 - `--timeout`: HTTPタイムアウト秒数
 - `--input-encoding`: stdin テキストエンコーディング (default: auto-detect)
-- `--auth-code`: API未初期化時の自動初期化に使う認証コード (default: `AITALK_AUTHCODE`)
-- `--language`: API未初期化時の自動初期化で使う言語 (default: `standard`)
-- `--voice`: API未初期化時の自動初期化で使う音声 (default: `nozomi_22`)
 
 ## HTTP API server (`aiohttp`)
 
@@ -65,30 +62,24 @@ Start server:
 aitalk-api-server --host 0.0.0.0 --port 8080
 ```
 
-Auto initialize engine on startup:
+Initialize engine on startup:
 
 ```bash
-aitalk-api-server --auto-init --auth-code "$AITALK_AUTHCODE" --language standard --voice nozomi_22
+aitalk-api-server --auth-code "$AITALK_AUTHCODE" --language standard --voice nozomi_22
 ```
 
 Endpoints:
 
 - `GET /health`
-- `POST /init` `{ "auth_code": "..." }`
 - `POST /lang/load` `{ "language": "standard" }`
 - `POST /voice/load` `{ "voice": "nozomi_22" }`
 - `POST /text-to-kana` `{ "text": "こんにちは" }`
 - `POST /kana-to-speech` `{ "kana": "...", "output": "binary|base64" }`
 - `POST /synthesize` `{ "text": "こんにちは", "output": "wav|pcm|base64" }`
-- `POST /end` `{}`
 
 Example:
 
 ```bash
-curl -X POST http://127.0.0.1:8080/init \
-  -H 'content-type: application/json' \
-  -d '{"auth_code":"YOUR_AUTH_CODE"}'
-
 curl -X POST http://127.0.0.1:8080/lang/load \
   -H 'content-type: application/json' \
   -d '{"language":"standard"}'

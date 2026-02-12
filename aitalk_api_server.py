@@ -20,8 +20,11 @@ class AITalkApiService:
     mutation/synthesis operations with a single lock.
     """
 
-    def __init__(self):
+    def __init__(self, auth_code, language, voice):
         self._lock = asyncio.Lock()
+        self._auth_code = auth_code
+        self._language = language
+        self._voice = voice
         self._initialized = False
 
     async def init(self, auth_code):
@@ -63,7 +66,7 @@ class AITalkApiService:
 
     def _require_initialized(self):
         if not self._initialized:
-            raise RuntimeError("engine is not initialized; call /init first")
+            raise RuntimeError("engine is not initialized")
 
 
 @web.middleware
@@ -89,15 +92,6 @@ async def _read_json(request):
 async def handle_health(request):
     service = request.app["service"]
     return json_response_ok(initialized=service._initialized)
-
-
-async def handle_init(request):
-    body = await _read_json(request)
-    auth_code = body.get("auth_code") or os.environ.get("AITALK_AUTHCODE")
-    if not auth_code:
-        raise web.HTTPBadRequest(text="auth_code is required")
-    await request.app["service"].init(auth_code)
-    return json_response_ok()
 
 
 async def handle_lang_load(request):
@@ -180,33 +174,34 @@ async def handle_synthesize(request):
     return web.Response(body=wav_bytes.getvalue(), content_type="audio/wav")
 
 
-async def handle_end(request):
-    await request.app["service"].end()
-    return json_response_ok()
-
-
 async def cleanup_context(app):
+    service = app["service"]
+    await service.init(service._auth_code)
+    await service.lang_load(service._language)
+    await service.voice_load(service._voice)
     try:
         yield
     finally:
-        await app["service"].end()
+        await service.end()
 
 
-def create_app():
+def create_app(args):
     app = web.Application(middlewares=[error_middleware])
-    app["service"] = AITalkApiService()
+    app["service"] = AITalkApiService(
+        auth_code=args.auth_code,
+        language=args.language,
+        voice=args.voice,
+    )
     app.cleanup_ctx.append(cleanup_context)
 
     app.add_routes(
         [
             web.get("/health", handle_health),
-            web.post("/init", handle_init),
             web.post("/lang/load", handle_lang_load),
             web.post("/voice/load", handle_voice_load),
             web.post("/text-to-kana", handle_text_to_kana),
             web.post("/kana-to-speech", handle_kana_to_speech),
             web.post("/synthesize", handle_synthesize),
-            web.post("/end", handle_end),
         ]
     )
     return app
@@ -217,43 +212,31 @@ def parse_args(argv=None):
     parser.add_argument("--host", default="127.0.0.1", help="bind host")
     parser.add_argument("--port", default=8080, type=int, help="bind port")
     parser.add_argument(
-        "--auto-init",
-        action="store_true",
-        help="call /init, /lang/load and /voice/load on startup",
-    )
-    parser.add_argument(
         "--auth-code",
         default=os.environ.get("AITALK_AUTHCODE"),
-        help="auth code used with --auto-init",
+        help="auth code used at startup initialization",
     )
     parser.add_argument(
         "--language",
         default="standard",
-        help="language used with --auto-init",
+        help="language used at startup initialization",
     )
     parser.add_argument(
         "--voice",
         default="nozomi_22",
-        help="voice used with --auto-init",
+        help="voice used at startup initialization",
     )
     return parser.parse_args(argv)
 
 
-async def _try_auto_init(app, args):
-    if not args.auto_init:
-        return
+def _validate_startup_args(args):
     if not args.auth_code:
-        raise ValueError("--auth-code (or AITALK_AUTHCODE) is required with --auto-init")
-
-    service = app["service"]
-    await service.init(args.auth_code)
-    await service.lang_load(args.language)
-    await service.voice_load(args.voice)
+        raise ValueError("--auth-code (or AITALK_AUTHCODE) is required")
 
 
 async def _start(args):
-    app = create_app()
-    await _try_auto_init(app, args)
+    _validate_startup_args(args)
+    app = create_app(args)
 
     runner = web.AppRunner(app)
     await runner.setup()
