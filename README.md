@@ -7,6 +7,7 @@ Python bindings and CLI utilities for `aitalked.dll`.
 - `aitalk.py`: `ctypes` bindings for `aitalked.dll` plus a small high-level session API
 - `aitalk_wav.py`: CLI that converts stdin text into WAV output
 - `aitalk_api_server.py`: `aiohttp` based HTTP API server that exposes `aitalk.py` functions
+- `aitalk_http_wav.py`: CLI that sends stdin text to the HTTP API and writes WAV output
 
 ## Requirements
 
@@ -36,6 +37,19 @@ Main options:
 - `--language`: language profile (default: `standard`)
 - `--auth-code`: auth code
 - `--input-encoding`: stdin text encoding (default: auto-detect)
+
+
+HTTP API 経由で合成するCLI:
+
+```bash
+echo こんにちは | python aitalk_http_wav.py out.wav
+```
+
+主なオプション:
+
+- `--api-url`: API ベースURL (default: `http://127.0.0.1:8080`)
+- `--timeout`: HTTPタイムアウト秒数
+- `--input-encoding`: stdin テキストエンコーディング (default: auto-detect)
 
 ## HTTP API server (`aiohttp`)
 
