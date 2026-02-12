@@ -13,14 +13,12 @@ high-level interface for common use cases:
 import os
 import sys
 import ctypes
+from ctypes import wintypes
 import enum
 import signal
 import io
 
 import subprocess
-import win32api
-import win32event
-import win32con
 
 __all__ = [
     "AITalkSession",
@@ -38,6 +36,70 @@ voice_db_dir = "Voice"
 license_path = "aitalk.lic"
 
 aitalked_dll = ctypes.WinDLL(os.path.join(install_path, "aitalked.dll"))
+kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+
+STD_INPUT_HANDLE = -10
+WAIT_OBJECT_0 = 0x00000000
+WAIT_ABANDONED = 0x00000080
+WAIT_TIMEOUT = 0x00000102
+WAIT_FAILED = 0xFFFFFFFF
+INFINITE = 0xFFFFFFFF
+
+
+class WinHandle:
+    def __init__(self, handle):
+        self.handle = handle
+
+    def close(self):
+        if self.handle:
+            kernel32.CloseHandle(self.handle)
+            self.handle = None
+
+
+kernel32.CloseHandle.restype = wintypes.BOOL
+kernel32.CloseHandle.argtypes = (wintypes.HANDLE,)
+
+kernel32.CreateEventW.restype = wintypes.HANDLE
+kernel32.CreateEventW.argtypes = (
+    wintypes.LPVOID,
+    wintypes.BOOL,
+    wintypes.BOOL,
+    wintypes.LPCWSTR,
+)
+
+kernel32.GetStdHandle.restype = wintypes.HANDLE
+kernel32.GetStdHandle.argtypes = (wintypes.DWORD,)
+
+kernel32.SetEvent.restype = wintypes.BOOL
+kernel32.SetEvent.argtypes = (wintypes.HANDLE,)
+
+kernel32.WaitForMultipleObjects.restype = wintypes.DWORD
+kernel32.WaitForMultipleObjects.argtypes = (
+    wintypes.DWORD,
+    ctypes.POINTER(wintypes.HANDLE),
+    wintypes.BOOL,
+    wintypes.DWORD,
+)
+
+
+def create_event(manual_reset=True, initial_state=False, name=None):
+    handle = kernel32.CreateEventW(None, manual_reset, initial_state, name)
+    if not handle:
+        raise ctypes.WinError(ctypes.get_last_error())
+    return WinHandle(handle)
+
+
+def set_event(event_handle):
+    if not kernel32.SetEvent(event_handle.handle):
+        raise ctypes.WinError(ctypes.get_last_error())
+
+
+def wait_for_multiple_objects(handles, wait_all=False, timeout=INFINITE):
+    raw_handles = (wintypes.HANDLE * len(handles))(*(h.handle if isinstance(h, WinHandle) else h for h in handles))
+    result = kernel32.WaitForMultipleObjects(len(handles), raw_handles, wait_all, timeout)
+    if result == WAIT_FAILED:
+        raise ctypes.WinError(ctypes.get_last_error())
+    return result
 
 class DoOnExit:
     """Call a function when leaving a context."""
@@ -52,34 +114,36 @@ class DoOnExit:
 
 def gen_sigint_handler(sigint_event):
     def sigint_handler(signum, frame):
-        win32event.SetEvent(sigint_event)
+        set_event(sigint_event)
     return sigint_handler
 
-def wait_complete(close_event_handle, timeout=win32event.INFINITE):
+def wait_complete(close_event_handle, timeout=INFINITE):
     """Wait for a conversion callback event and support Ctrl+C interruption."""
     sigint_handler_save = signal.getsignal(signal.SIGINT)
-    sigint_event = win32event.CreateEvent(None, True, False, None)
+    sigint_event = create_event(True, False, None)
     with \
         DoOnExit(signal.signal, (signal.SIGINT, sigint_handler_save)) , \
         DoOnExit(sigint_event.close) :
-        stdin_handle = win32api.GetStdHandle(win32api.STD_INPUT_HANDLE)
+        stdin_handle = kernel32.GetStdHandle(wintypes.DWORD(STD_INPUT_HANDLE & 0xFFFFFFFF))
+        if stdin_handle in (None, 0, wintypes.HANDLE(-1).value):
+            raise ctypes.WinError(ctypes.get_last_error())
         signal.signal(signal.SIGINT, gen_sigint_handler(sigint_event))
         event_array = (sigint_event, close_event_handle, stdin_handle)
 
         while True:
-            wait_result = win32event.WaitForMultipleObjects(event_array, False, timeout)
-            if wait_result == win32event.WAIT_TIMEOUT:
+            wait_result = wait_for_multiple_objects(event_array, False, timeout)
+            if wait_result == WAIT_TIMEOUT:
                 raise Exception("timeout")
-            elif wait_result == win32con.WAIT_OBJECT_0:
+            elif wait_result == WAIT_OBJECT_0:
                 end()
                 raise Exception("sigint")
-            elif wait_result == win32con.WAIT_OBJECT_0 + 1:
+            elif wait_result == WAIT_OBJECT_0 + 1:
                 break
-            elif wait_result == win32con.WAIT_OBJECT_0 + 2:
+            elif wait_result == WAIT_OBJECT_0 + 2:
                 continue
-            elif wait_result == win32event.WAIT_ABANDONED:
+            elif wait_result == WAIT_ABANDONED:
                 raise Exception("WAIT_ABANDONED")
-            elif wait_result == win32event.WAIT_TIMEOUT:
+            elif wait_result == WAIT_TIMEOUT:
                 raise Exception("timeout")
             else:
                 raise Exception("unexpected wait_result 0x%x" % wait_result)
@@ -284,7 +348,7 @@ class JobParam(ctypes.Structure):
 class ConversionData():
     def __init__(self, outfile, buffer_length):
         self.buffer = (ctypes.c_char*buffer_length)()
-        self.close_event_handle = win32event.CreateEvent(None, True, False, None)
+        self.close_event_handle = create_event(True, False, None)
         self.output = outfile
         
     def __enter__(self):
@@ -295,7 +359,7 @@ class ConversionData():
 def gen_text_to_kana_data(outfile):
     return ConversionData(outfile, KANA_BUFFER_SIZE)
 
-def text_to_kana(text, timeout=win32event.INFINITE):
+def text_to_kana(text, timeout=INFINITE):
     """Convert plain text to AIKANA text."""
     text_encoded = text.encode(ENCODING, errors='ignore')
     with io.BytesIO() as outfile, gen_text_to_kana_data(outfile) as user_data:
@@ -312,7 +376,7 @@ def text_to_kana(text, timeout=win32event.INFINITE):
 def gen_kana_to_speech_data(file):
     return ConversionData(file, SPEECH_BUFFER_SIZE*2)
 
-def kana_to_speech(kana, outfile, timeout=win32event.INFINITE):
+def kana_to_speech(kana, outfile, timeout=INFINITE):
     """Convert AIKANA text to little-endian 16-bit PCM and write to stream."""
     kana_encoded = kana.encode(ENCODING)
     with gen_kana_to_speech_data(outfile) as user_data:
@@ -339,7 +403,7 @@ def callback_text_buf(reason_code, job_id, user_data):
                 break
         if reason_code != EventReasonCode.TEXTBUF_CLOSE:
             return 0
-    win32event.SetEvent(user_data.close_event_handle)
+    set_event(user_data.close_event_handle)
     return 0
 callback_text_buf_ptr = ProcTextBuf(callback_text_buf)
 
@@ -357,7 +421,7 @@ def callback_raw_buf(reason_code, job_id, tick, user_data):
                 break
         if reason_code != EventReasonCode.RAWBUF_CLOSE:
             return 0
-    win32event.SetEvent(user_data.close_event_handle)
+    set_event(user_data.close_event_handle)
     return 0
 callback_raw_buf_ptr = ProcRawBuf(callback_raw_buf)
 
@@ -526,6 +590,5 @@ _voice_clear.argtypes = ()
 # using Type_AITalkAPI_VoiceLoad = AITalkResultCode(__stdcall *)(const char*);
 _voice_load.restype = ctypes.c_int32
 _voice_load.argtypes = (ctypes.c_char_p, )
-
 
 
