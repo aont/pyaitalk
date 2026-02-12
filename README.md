@@ -6,6 +6,7 @@ Python bindings and CLI utilities for `aitalked.dll`.
 
 - `aitalk.py`: `ctypes` bindings for `aitalked.dll` plus a small high-level session API
 - `aitalk_wav.py`: CLI that converts stdin text into WAV output
+- `aitalk_api_server.py`: `aiohttp` based HTTP API server that exposes `aitalk.py` functions
 
 ## Requirements
 
@@ -35,6 +36,51 @@ Main options:
 - `--language`: language profile (default: `standard`)
 - `--auth-code`: auth code
 - `--input-encoding`: stdin text encoding (default: auto-detect)
+
+## HTTP API server (`aiohttp`)
+
+Start server:
+
+```bash
+aitalk-api-server --host 0.0.0.0 --port 8080
+```
+
+Auto initialize engine on startup:
+
+```bash
+aitalk-api-server --auto-init --auth-code "$AITALK_AUTHCODE" --language standard --voice nozomi_22
+```
+
+Endpoints:
+
+- `GET /health`
+- `POST /init` `{ "auth_code": "..." }`
+- `POST /lang/load` `{ "language": "standard" }`
+- `POST /voice/load` `{ "voice": "nozomi_22" }`
+- `POST /text-to-kana` `{ "text": "こんにちは" }`
+- `POST /kana-to-speech` `{ "kana": "...", "output": "binary|base64" }`
+- `POST /synthesize` `{ "text": "こんにちは", "output": "wav|pcm|base64" }`
+- `POST /end` `{}`
+
+Example:
+
+```bash
+curl -X POST http://127.0.0.1:8080/init \
+  -H 'content-type: application/json' \
+  -d '{"auth_code":"YOUR_AUTH_CODE"}'
+
+curl -X POST http://127.0.0.1:8080/lang/load \
+  -H 'content-type: application/json' \
+  -d '{"language":"standard"}'
+
+curl -X POST http://127.0.0.1:8080/voice/load \
+  -H 'content-type: application/json' \
+  -d '{"voice":"nozomi_22"}'
+
+curl -X POST http://127.0.0.1:8080/synthesize \
+  -H 'content-type: application/json' \
+  -d '{"text":"こんにちは","output":"wav"}' > out.wav
+```
 
 ## Python API example
 

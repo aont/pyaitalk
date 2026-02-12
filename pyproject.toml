@@ -18,6 +18,7 @@ classifiers = [
   "License :: OSI Approved :: MIT License",
 ]
 keywords = ["aitalk", "tts", "ctypes", "windows"]
+dependencies = ["aiohttp>=3.9"]
 
 [project.urls]
 Homepage = "https://github.com/aont/pyaitalk/"
@@ -26,6 +27,7 @@ Issues = "https://github.com/aont/pyaitalk/issues"
 
 [project.scripts]
 aitalk-wav = "aitalk_wav:main"
+aitalk-api-server = "aitalk_api_server:main"
 
 [tool.setuptools]
-py-modules = ["aitalk", "aitalk_wav"]
+py-modules = ["aitalk", "aitalk_wav", "aitalk_api_server"]
