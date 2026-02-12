@@ -101,12 +101,12 @@ def post_json(api_url, endpoint, payload, timeout):
         return response.read()
 
 
-def synthesize_wav(api_url, text, timeout):
-    return post_json(api_url, "/synthesize", {"text": text, "output": "wav"}, timeout)
+def synthesize_wav(api_url, text, timeout, character=None):
+    payload = {"text": text, "output": "wav"}
+    if character:
+        payload["character"] = character
+    return post_json(api_url, "/synthesize", payload, timeout)
 
-
-def select_character(api_url, character, timeout):
-    return post_json(api_url, "/voice/load", {"voice": character}, timeout)
 
 
 def fetch_characters(api_url, timeout):
@@ -121,9 +121,7 @@ def fetch_characters(api_url, timeout):
 
 def synthesize_wav_or_raise(api_url, text, timeout, character=None):
     try:
-        if character:
-            select_character(api_url, character, timeout)
-        return synthesize_wav(api_url, text, timeout)
+        return synthesize_wav(api_url, text, timeout, character=character)
     except urllib.error.HTTPError as exc:
         detail = exc.read().decode("utf-8", errors="replace")
         raise RuntimeError(f"HTTP {exc.code} from API: {detail}") from exc

@@ -26,21 +26,45 @@ class AITalkApiService:
         self._language = language
         self._voice = voice
         self._initialized = False
+        self._loaded_language = None
+        self._loaded_voice = None
 
     async def init(self, auth_code):
         async with self._lock:
             aitalk.init(auth_code)
             self._initialized = True
+            self._loaded_language = None
+            self._loaded_voice = None
 
     async def lang_load(self, language):
         async with self._lock:
             self._require_initialized()
             aitalk.lang_load(language)
+            self._loaded_language = language
 
     async def voice_load(self, voice):
         async with self._lock:
             self._require_initialized()
             aitalk.voice_load(voice)
+            self._loaded_voice = voice
+
+    async def ensure_character(self, voice):
+        async with self._lock:
+            self._require_initialized()
+            if self._loaded_voice == voice:
+                return
+
+            aitalk.end()
+            self._initialized = False
+            self._loaded_language = None
+            self._loaded_voice = None
+
+            aitalk.init(self._auth_code)
+            self._initialized = True
+            aitalk.lang_load(self._language)
+            self._loaded_language = self._language
+            aitalk.voice_load(voice)
+            self._loaded_voice = voice
 
     async def list_voices(self):
         voice_dir = os.path.join(aitalk.install_path, aitalk.voice_db_dir)
@@ -79,6 +103,8 @@ class AITalkApiService:
             if self._initialized:
                 aitalk.end()
                 self._initialized = False
+                self._loaded_language = None
+                self._loaded_voice = None
 
     def _require_initialized(self):
         if not self._initialized:
@@ -171,6 +197,10 @@ async def handle_synthesize(request):
     text = body.get("text")
     if text is None:
         raise web.HTTPBadRequest(text="text is required")
+
+    character = body.get("character")
+    if character:
+        await request.app["service"].ensure_character(character)
 
     pcm = await request.app["service"].synthesize_text_to_pcm(text)
     output = body.get("output", "wav")

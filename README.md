@@ -79,7 +79,13 @@ Endpoints:
 - `GET /voice/list`
 - `POST /text-to-kana` `{ "text": "こんにちは" }`
 - `POST /kana-to-speech` `{ "kana": "...", "output": "binary|base64" }`
-- `POST /synthesize` `{ "text": "こんにちは", "output": "wav|pcm|base64" }`
+- `POST /synthesize` `{ "text": "こんにちは", "character": "nozomi_22"(optional), "output": "wav|pcm|base64" }`
+
+
+Character switching behavior:
+
+- If `character` is omitted, synthesis uses the currently loaded voice.
+- If `character` is provided and it differs from the currently loaded voice, the server terminates the AITalk engine and reinitializes it before loading that character.
 
 Example:
 
@@ -94,7 +100,7 @@ curl -X POST http://127.0.0.1:8080/voice/load \
 
 curl -X POST http://127.0.0.1:8080/synthesize \
   -H 'content-type: application/json' \
-  -d '{"text":"こんにちは","output":"wav"}' > out.wav
+  -d '{"text":"こんにちは","character":"nozomi_22","output":"wav"}' > out.wav
 ```
 
 ## Python API example
