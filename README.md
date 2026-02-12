@@ -75,7 +75,6 @@ Endpoints:
 
 - `GET /health`
 - `POST /lang/load` `{ "language": "standard" }`
-- `POST /voice/load` `{ "voice": "nozomi_22" }`
 - `GET /voice/list`
 - `POST /text-to-kana` `{ "text": "こんにちは" }`
 - `POST /kana-to-speech` `{ "kana": "...", "output": "binary|base64" }`
@@ -94,9 +93,6 @@ curl -X POST http://127.0.0.1:8080/lang/load \
   -H 'content-type: application/json' \
   -d '{"language":"standard"}'
 
-curl -X POST http://127.0.0.1:8080/voice/load \
-  -H 'content-type: application/json' \
-  -d '{"voice":"nozomi_22"}'
 
 curl -X POST http://127.0.0.1:8080/synthesize \
   -H 'content-type: application/json' \

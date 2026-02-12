@@ -143,13 +143,6 @@ async def handle_lang_load(request):
     return json_response_ok(language=language)
 
 
-async def handle_voice_load(request):
-    body = await _read_json(request)
-    voice = body.get("voice", "nozomi_22")
-    await request.app["service"].voice_load(voice)
-    return json_response_ok(voice=voice)
-
-
 async def handle_voice_list(request):
     voices = await request.app["service"].list_voices()
     return json_response_ok(voices=voices)
@@ -249,7 +242,6 @@ def create_app(args):
         [
             web.get("/health", handle_health),
             web.post("/lang/load", handle_lang_load),
-            web.post("/voice/load", handle_voice_load),
             web.get("/voice/list", handle_voice_list),
             web.post("/text-to-kana", handle_text_to_kana),
             web.post("/kana-to-speech", handle_kana_to_speech),
