@@ -18,7 +18,11 @@ classifiers = [
   "License :: OSI Approved :: MIT License",
 ]
 keywords = ["aitalk", "tts", "ctypes", "windows"]
-dependencies = ["aiohttp>=3.9"]
+dependencies = [
+  "aiohttp>=3.9",
+  # Fail installation unless running on 32-bit Windows (win32 + x86/i386).
+  "pyaitalk-platform-unsupported==0; sys_platform != 'win32' or (platform_machine != 'x86' and platform_machine != 'i386')",
+]
 
 [project.urls]
 Homepage = "https://github.com/aont/pyaitalk/"
