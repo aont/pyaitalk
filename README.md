@@ -14,10 +14,16 @@ Python bindings and CLI utilities for `aitalked.dll`.
 - Windows
 - A local installation that provides `aitalked.dll`
 
-## Environment variables
+## Configuration (`config.toml`)
 
-- `AITALK_PATH`: installation directory that contains `aitalked.dll`
-- `AITALK_AUTHCODE`: auth code (used when `--auth-code` is not provided)
+Create `config.toml`:
+
+```toml
+aitalk_path = "C:/path/to/aitalk"
+aitalk_authcode = "YOUR_AUTH_CODE"
+```
+
+Deprecated (still supported): `AITALK_PATH`, `AITALK_AUTHCODE`.
 
 ## CLI usage
 
@@ -35,7 +41,8 @@ Main options:
 
 - `--voice`: voice name (default: `nozomi_22`)
 - `--language`: language profile (default: `standard`)
-- `--auth-code`: auth code
+- `--config`: path to `config.toml`
+- `--auth-code`: deprecated
 - `--input-encoding`: stdin text encoding (default: auto-detect)
 
 
@@ -68,7 +75,7 @@ aitalk-api-server --host 0.0.0.0 --port 8080
 Initialize engine on startup:
 
 ```bash
-aitalk-api-server --auth-code "$AITALK_AUTHCODE" --language standard --voice nozomi_22
+aitalk-api-server --config ./config.toml --language standard --voice nozomi_22
 ```
 
 Endpoints:

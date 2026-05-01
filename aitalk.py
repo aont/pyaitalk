@@ -31,7 +31,9 @@ __all__ = [
     "voice_load",
 ]
 
-install_path = os.environ["AITALK_PATH"]
+from aitalk_config import resolve_aitalk_path
+
+install_path = resolve_aitalk_path()
 voice_db_dir = "Voice"
 license_path = "aitalk.lic"
 
@@ -536,4 +538,3 @@ _voice_clear.argtypes = ()
 # using Type_AITalkAPI_VoiceLoad = AITalkResultCode(__stdcall *)(const char*);
 _voice_load.restype = ctypes.c_int32
 _voice_load.argtypes = (ctypes.c_char_p, )
-

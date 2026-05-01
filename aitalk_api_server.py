@@ -10,8 +10,7 @@ import os
 import wave
 
 from aiohttp import web
-
-import aitalk
+from aitalk_config import CONFIG_ENV_VAR, resolve_auth_code
 
 
 logger = logging.getLogger(__name__)
@@ -290,8 +289,13 @@ def parse_args(argv=None):
     parser.add_argument("--port", default=8080, type=int, help="bind port")
     parser.add_argument(
         "--auth-code",
-        default=os.environ.get("AITALK_AUTHCODE"),
-        help="auth code used at startup initialization",
+        default=None,
+        help="(Deprecated) auth code used at startup initialization",
+    )
+    parser.add_argument(
+        "--config",
+        default=None,
+        help="Path to config.toml (default: ./config.toml)",
     )
     parser.add_argument(
         "--language",
@@ -313,7 +317,7 @@ def parse_args(argv=None):
 
 def _validate_startup_args(args):
     if not args.auth_code:
-        raise ValueError("--auth-code (or AITALK_AUTHCODE) is required")
+        raise ValueError("aitalk_authcode is required in config.toml")
 
 
 async def _start(args):
@@ -332,6 +336,11 @@ async def _start(args):
 
 def main(argv=None):
     args = parse_args(argv)
+    if args.config:
+        os.environ[CONFIG_ENV_VAR] = args.config
+    args.auth_code = resolve_auth_code(args.auth_code, config_path=args.config)
+    global aitalk
+    import aitalk
     logging.basicConfig(
         level=logging.DEBUG if args.debug else logging.INFO,
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",

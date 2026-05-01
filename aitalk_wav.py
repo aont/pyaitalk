@@ -7,7 +7,7 @@ import os
 import sys
 import wave
 
-import aitalk
+from aitalk_config import CONFIG_ENV_VAR, resolve_auth_code
 
 DEFAULT_LANGUAGE = "standard"
 DEFAULT_VOICE = "nozomi_22"
@@ -61,11 +61,11 @@ def decode_input_text(raw_text, input_encoding=None):
 class WavWriter:
     """Context manager for writing AI Talk raw PCM into a WAV file."""
 
-    def __init__(self, outwavfn):
+    def __init__(self, outwavfn, sample_rate):
         self.wave_file = wave.open(outwavfn, "wb")
         self.wave_file.setnchannels(1)
         self.wave_file.setsampwidth(2)
-        self.wave_file.setframerate(aitalk.VOICE_SAMPLERATE)
+        self.wave_file.setframerate(sample_rate)
 
     def stdin(self):
         return self
@@ -95,10 +95,11 @@ def parse_args(argv=None):
         default=DEFAULT_VOICE,
         help=f"Voice name to load (default: {DEFAULT_VOICE})",
     )
+    parser.add_argument("--auth-code", default=None, help="(Deprecated) auth code.")
     parser.add_argument(
-        "--auth-code",
-        default=os.environ.get("AITALK_AUTHCODE"),
-        help="Auth code. Defaults to AITALK_AUTHCODE environment variable.",
+        "--config",
+        default=None,
+        help="Path to config.toml (default: ./config.toml)",
     )
     parser.add_argument(
         "--input-encoding",
@@ -111,14 +112,17 @@ def parse_args(argv=None):
 def main(argv=None):
     args = parse_args(argv)
 
-    if not args.auth_code:
-        raise ValueError("auth code is required (use --auth-code or AITALK_AUTHCODE)")
+    if args.config:
+        os.environ[CONFIG_ENV_VAR] = args.config
+    import aitalk
+
+    auth_code = resolve_auth_code(args.auth_code, config_path=args.config)
 
     raw_text = sys.stdin.buffer.read()
     text = decode_input_text(raw_text, args.input_encoding)
-    with aitalk.AITalkSession(args.auth_code, language=args.language, voice=args.voice) as session:
+    with aitalk.AITalkSession(auth_code, language=args.language, voice=args.voice) as session:
         kana = session.text_to_kana(text)
-        with WavWriter(args.output) as wav_writer:
+        with WavWriter(args.output, aitalk.VOICE_SAMPLERATE) as wav_writer:
             aitalk.kana_to_speech(kana, wav_writer.stdin())
 
     return 0
