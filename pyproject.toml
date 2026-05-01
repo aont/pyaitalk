@@ -31,4 +31,4 @@ aitalk-api-server = "aitalk_api_server:main"
 aitalk-http-wav = "aitalk_http_wav:main"
 
 [tool.setuptools]
-py-modules = ["aitalk", "aitalk_wav", "aitalk_api_server", "aitalk_http_wav"]
+py-modules = ["aitalk", "aitalk_config", "aitalk_wav", "aitalk_api_server", "aitalk_http_wav"]
